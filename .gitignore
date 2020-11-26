@@ -127,3 +127,13 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+*.fasta
+*.gz
+*.json
+events.out.*
+*.pth
+*.lock
+*_checkpoint
+*.csv
+*.jpg
+*.png
