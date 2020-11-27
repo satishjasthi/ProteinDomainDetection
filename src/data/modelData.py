@@ -30,9 +30,7 @@ class ObjectDetection:
         self.images_dir = self.data_dir/f'PfamData/images_{self.img_dim}'
         if not self.images_dir.exists():
             self.images_dir.mkdir(parents=True, exist_ok=True)
-        self.annotations_dir = self.data_dir/f'PfamData/annotations_{self.img_dim}'
-        if not  self.annotations_dir.exists():
-             self.annotations_dir.mkdir(parents=True, exist_ok=True)
+    
              
         # color map
         self.color_map = {}
@@ -97,63 +95,107 @@ class ObjectDetection:
         
         else:
             return data_df
-    
-            
-    
-            
-    @staticmethod
-    def create_coco_annotations(df,C2I, img_h, img_w):
-        json_data = {   
-    "info": {
-            "year": "2020",
-            "version": "1",
-            "description": "Protein Domain annotation data",
-            "contributor": "SatishJasthi",
-            "url": None,
-            "date_created": None
-        },
-        "licenses": [
-            {
-                "id": None,
-                "url": None,
-                "name": None
-            }
-        ],
-        "categories":[],
-        "images":[],
-        "annotations":[],
-        }
-        # add categories
-        for index, class_name in enumerate(df['Class'].unique()):
-            json_data["categories"].append({"id": index+1,"name": class_name,"supercategory": "ProteinDomain"})
-            
-        # add images and annotations
-        for index, row in df.iterrows():
 
-            json_data["images"].append({
-                "id": index,
-                "license": None,
-                "file_name": Path(row['img_pth']).name,
-                "height": img_h,
-                "width": img_w,
-                "date_captured": None,
-                "dom_pos":row["dom_pos"]
-            })
-            json_data['annotations'].append({
-                "id": index,
-                "image_id": index,
-                "category_id": C2I[row['Class']]+1,
-                "bbox": [
-                    row['dom_pos'][0],
-                    0,
-                    (row['dom_pos'][1])-(row['dom_pos'][0]),
-                    img_h
-                ],
-                "area": img_h*((row['dom_pos'][1])-(row['dom_pos'][0])),
-                "iscrowd":0
+    def create_protein_domain_df(self):
+        data = {}
+        for clss in self.class_names:
+            print(f'Fetching data from FASTA files for {clss}')
+            cls_name, sub_cls_id = clss.split('-')
+            full_sequence_data = self.data_dir/f'PfamData/{cls_name}___full_sequence_data/{cls_name}-{sub_cls_id}___full_sequence_data.fasta'
+            domain_data = self.data_dir/f'PfamData/{cls_name}___full_sequence_data/{cls_name}-{sub_cls_id}___domain_data.fasta'     
+            
+            # extract data from fasta files
+            for record in SeqIO.parse(full_sequence_data,'fasta'):
+                data[record.id] = {}
+                data[record.id]['id'] = record.id
+                data[record.id]['name'] = record.name
+                data[record.id]['Sequence'] = record.seq._data
+                data[record.id]['Class'] = sub_cls_id
+                data[record.id]['SeqLen']= len(record.seq._data)
+                data[record.id]['SuperClass'] = cls_name
+                assert 'PF' in data[record.id]['Class']
+                data[record.id]['img_pth'] = self.images_dir/f"img_{record.id}_{data[record.id]['Class']}_{ data[record.id]['SuperClass']}.png"
+                
+            for record in SeqIO.parse(domain_data, 'fasta'):
+                id_ = record.id.split('/')[0]
+                # to ensure the indexing of the domains starts at 0 1 is sub
+                data[id_]['dom_pos'] = [int(pos)-1 for  pos in record.id.split('/')[-1].split('-')]   
+                data[id_]['dom_len'] = len(record.seq._data)
+                data[id_]['dom'] = record.seq._data
+                
+        data_df = pd.DataFrame(data=data.values())
+        tot_num_rows = data_df.shape[0]
+        # because this class has just one sample
+        data_df = data_df[data_df['Class']!='PF13647']
+        
+        data_df['SeqLen'] = data_df['Sequence'].apply(lambda x: len(x))
+        # so that none of the domain pos is missing
+        assert data_df['dom_pos'].isna().sum() == 0
+        num_total_rows = data_df.shape[0]
+        data_df = data_df.drop_duplicates(subset=['Sequence'])
+        print(f'Dropped {num_total_rows - data_df.shape[0]} number of duplicates based on sequences')
+        
+        data_df.to_csv(self.data_dir/f'PfamData/model_data.csv',index=False)
+        print('Class distribution: \n')
+        print(data_df['Class'].value_counts())
+        return data_df
+    
+    def get_bucketised_data(self, data_df):
+        data_buckets = {'<1k':{"below_300":[],
+                               "300_600":[],
+                               "600_1000":[],
+                               "above_1k":[],
+                               },
+                        '1k-10k':{"below_300":[],
+                               "300_600":[],
+                               "600_1000":[],
+                               "above_1k":[],
+                               },
+                        '>10k':{"below_300":[],
+                               "300_600":[],
+                               "600_1000":[],
+                               "above_1k":[],
+                               }
+                        }
+        for class_name in self.class_names:
+            class_df = data_df[data_df['Class']==class_name.split('-')[-1]]
+            num_samples = class_df.shape[0]
+            if num_samples < 1000:
+                data_buckets['<1k']["below_300"].append(class_df[class_df['SeqLen']<300])
+                data_buckets['<1k']["300_600"].append(class_df[(class_df['SeqLen']>=300) & (class_df['SeqLen']<600)])
+                data_buckets['<1k']["600_1000"].append(class_df[(class_df['SeqLen']>=600) & (class_df['SeqLen']<=1000)])
+                data_buckets['<1k']["above_1k"].append(class_df[class_df['SeqLen']>1000])
+                                       
+            elif num_samples >=1000 and num_samples <10000:
+                data_buckets['1k-10k']["below_300"].append(class_df[class_df['SeqLen']<300])
+                data_buckets['1k-10k']["300_600"].append(class_df[(class_df['SeqLen']>=300) & (class_df['SeqLen']<600)])
+                data_buckets['1k-10k']["600_1000"].append(class_df[(class_df['SeqLen']>=600) & (class_df['SeqLen']<=1000)])
+                data_buckets['1k-10k']["above_1k"].append(class_df[class_df['SeqLen']>1000])
+                                       
+            elif num_samples >=10000:
+                data_buckets['>10k']["below_300"].append(class_df[class_df['SeqLen']<300])
+                data_buckets['>10k']["300_600"].append(class_df[(class_df['SeqLen']>=300) & (class_df['SeqLen']<600)])
+                data_buckets['>10k']["600_1000"].append(class_df[(class_df['SeqLen']>=600) & (class_df['SeqLen']<=1000)])
+                data_buckets['>10k']["above_1k"].append(class_df[class_df['SeqLen']>1000])
+                
+        filter_fnc = lambda x: True if x is not None else False
+        return {'<1k':{"below_300":pd.concat(filter(filter_fnc, data_buckets['<1k']["below_300"]),axis='rows'),
+                               "300_600":pd.concat(filter(filter_fnc, data_buckets['<1k']["300_600"]),axis='rows'),
+                               "600_1000":pd.concat(filter(filter_fnc, data_buckets['<1k']["600_1000"]),axis='rows'),
+                               "above_1k":pd.concat(filter(filter_fnc, data_buckets['<1k']["above_1k"]),axis='rows'),
+                               },
+                '1k-10k':{"below_300":pd.concat(filter(filter_fnc,data_buckets['1k-10k']["below_300"]),axis='rows'),
+                        "300_600":pd.concat(filter(filter_fnc,data_buckets['1k-10k']["300_600"]),axis='rows'),
+                        "600_1000":pd.concat(filter(filter_fnc,data_buckets['1k-10k']["600_1000"]),axis='rows'),
+                        "above_1k":pd.concat(filter(filter_fnc,data_buckets['1k-10k']["above_1k"]),axis='rows'),
+                        },
+                '>10k':{"below_300":pd.concat(filter(filter_fnc,data_buckets['>10k']["below_300"]),axis='rows'),
+                        "300_600":pd.concat(filter(filter_fnc,data_buckets['>10k']["300_600"]),axis='rows'),
+                        "600_1000":pd.concat(filter(filter_fnc,data_buckets['>10k']["600_1000"]),axis='rows'),
+                        "above_1k":pd.concat(filter(filter_fnc,data_buckets['>10k']["above_1k"]),axis='rows'),
+                        }
+                        }
 
-            })
-        return json_data
     
     def create_coco_data(self, augment_data=False, num_augs=2000, img_h=224, img_w = 1000):
         """
@@ -224,5 +266,38 @@ class ObjectDetection:
             
             
 if __name__ == "__main__":
-    o = ObjectDetection(class_names=['Lysozyme_PF16754', 'Lysozyme_PF18013', 'Lysozyme_PF01374', 'Lysozyme_PF13702', 'Lysozyme_PF11860', 'Lysozyme_PF03245'], img_dim=224)
-    o.create_coco_data(augment_data=True, num_augs=1000, img_h=224, img_w=1000)
+    classes = ['Lysozyme-PF03245',
+    'Lysozyme-PF16754',
+    'Lysozyme-PF11860',
+    'Lysozyme-PF13702',
+    'Lysozyme-PF00959',
+    'Lysozyme-PF00182',
+    'Lysozyme-PF00704',
+    'Lysozyme-PF01374',
+    'Lysozyme-PF05838',
+    'Lysozyme-PF18013',
+    'Lysozyme-PF04965',
+    'Lysozyme-PF01183',
+    'Lysozyme-PF00722',
+    'peptidase-PF05193',
+    'peptidase-PF01551',
+    'peptidase-PF00675',
+    'peptidase-PF01435',
+    'peptidase-PF01433',
+    'peptidase-PF10502',
+    'peptidase-PF00246',
+    'peptidase-PF03572',
+    'peptidase-PF00814',
+    'peptidase-PF17900',
+    'Amidase_2-PF01510',
+    'Amidase_3-PF01520',
+    'CHAP-PF05257',
+    'SH3_4-PF06347',
+    'SH3_3-PF08239',
+    'SH3_5-PF08460',
+    'LysM-PF01476']
+    o = ObjectDetection(class_names=classes, img_dim=224)
+    df = o.create_protein_domain_df()
+    class_count = dict(df['Class'].value_counts())
+    data_buckets = o.get_bucketised_data(df)
+    
