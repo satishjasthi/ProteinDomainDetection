@@ -1,5 +1,5 @@
 """
-Model to train protein sequences of len btw 0-300 and samples size 0-1000
+Model to train protein sequences of len btw 0-300 and samples size 1k-10k
 """
 import sys, random , re, os
 from pathlib import Path
@@ -39,7 +39,7 @@ from src.data.modelData import ObjectDetection, create_protein_seq_image
 
 
 seq_len_bucket = (0, 300)
-num_sample_bucket = (0,1000)
+num_sample_bucket = (1000,10000)
 img_h, img_w = 224, seq_len_bucket[1]
 config_name = f"seq_len_{seq_len_bucket[0]}-{seq_len_bucket[1]}_and_num_samples_{num_sample_bucket[0]}-{num_sample_bucket[1]}"
 
@@ -96,6 +96,10 @@ bucket_df = data_handler.get_bucketised_data(protein_domain_data, seq_len_bucket
 class_freq_map = dict(bucket_df['Class'].value_counts())
 classes = [cls for cls in list(bucket_df['Class'].unique()) if class_freq_map[cls]>50]
 bucket_df = bucket_df[bucket_df['Class'].isin(classes)]
+# select sub set classes !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# bucket_df = bucket_df[bucket_df['Class'].isin(['PF08239', 'PF06347', 'PF00246', 'PF01510'])]
+# classes= list(bucket_df['Class'].unique() )
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 bucket_df.to_csv(ProjectRoot/f"data/PfamData/seq_len_{'-'.join([str(x) for x in seq_len_bucket])}_and_num_samples_{'-'.join([str(x) for x in num_sample_bucket])}_data.csv",index=False)
 
 
@@ -108,67 +112,6 @@ model_data =  pd.read_csv(ProjectRoot/f"data/PfamData/{config_name}_data.csv")
 print(f"Selected {model_data['Class'].nunique()} classes:\n{model_data['Class'].unique()}")
 
 
-########################################## DATA ENRICHING ####################################################################################
-# enrich PF13702, PF08460, PF18013, PF16754 classes data by taking random crop samples
-# of same classes from segment where seq len is btw 300 and 600 using random crop of 
-# sequences to length 300 with domain
-
-required_cls_sample_size = 350
-#classes2enrich = ['PF13702', 'PF08460', 'PF18013', 'PF16754']
-classes2enrich = ['PF16754']
-_300_600_data = pd.read_csv(ProjectRoot/f'data/PfamData/{config_name}_data.csv')
-_300_600_data['dom_pos'] = _300_600_data['dom_pos'].apply(lambda x: [int(y) for y in x.replace('[', "").replace("]","").split(",")])
-new_bucket_class_freq = dict(_300_600_data[_300_600_data['Class'].isin(list(bucket_df['Class'].unique()))]['Class'].value_counts())
-enrich_img_save_dir = images_dir
-
-enrich_rows = []
-for cls_name in classes2enrich:
-    new_cls_df = _300_600_data[_300_600_data['Class']==cls_name]
-    old_cls_df = bucket_df[bucket_df['Class']==cls_name]
-    num_augs = required_cls_sample_size - old_cls_df.shape[0]
-    
-    # sample sequences form new class_df
-    print(f'Class: {cls_name}')
-    print(f"   number of classes present: {len(old_cls_df)}-->{required_cls_sample_size}")
-    print(f"   number of augs req: {num_augs}")
-    new_cls_rows = [row for index, row in new_cls_df.iterrows()]
-    aug_compl = 0
-
-    while aug_compl < required_cls_sample_size:
-        row_data = random.choice(new_cls_rows)
-        sequence = row_data['Sequence']
-        dom_start, dom_end = row_data['dom_pos']
-        start_range = list(range(dom_start))
-        end_range = list(range(dom_end+1, len(sequence)))
-        if len(start_range) >2 and len(end_range) >2:
-            cropped_seq = sequence[random.choice(start_range): random.choice(end_range)]
-            if len(cropped_seq)<seq_len_bucket[1]:
-                assert row_data['dom'] in cropped_seq, f"{ row_data['dom']}, {cropped_seq}"
-                new_dom_pos = [(m.start(0), m.end(0)) for m in re.finditer(row_data['dom'], cropped_seq)][0]
-                assert cropped_seq[new_dom_pos[0]:new_dom_pos[1]] == row_data['dom']
-                img_name = enrich_img_save_dir/f'{cls_name}_random_crop_{aug_compl}.png'
-                enrich_rows.append({'Class':cls_name,
-                             'SeqLen':len(cropped_seq),
-                             'Sequence':cropped_seq,
-                             'SuperClass':row_data['SuperClass'],
-                             'dom':cropped_seq[new_dom_pos[0]:new_dom_pos[1]],
-                             'dom_len':len(cropped_seq[new_dom_pos[0]:new_dom_pos[1]]),
-                             'dom_pos':new_dom_pos,
-                             'id':row_data['id'],
-                             'img_pth':str(img_name),
-                             'name':row_data['name']})
-                #create image
-                create_protein_seq_image((cropped_seq,img_name, img_h, seq_len_bucket[1]), data_handler.color_map)
-                aug_compl+=1
-            else:
-                continue
-        else:
-            continue
-        
-enriched_data_df = pd.DataFrame(enrich_rows)
-
-##############################################################################################################################################
-
 ###############################################Create Model Data##############################################################################
 
 
@@ -177,9 +120,12 @@ def create_train_valid_test_data(data_df):
     for class_name in data_df['Class'].unique():
         class_df = data_df[data_df['Class']==class_name].sample(frac=1)
         num_samples = class_df.shape[0]
-        num_train_samples = int(round(num_samples*0.7))
+        # num_train_samples = int(round(num_samples*0.7))
+        num_train_samples = 500
+        num_valid_samples = 200
         train_dfs.append(class_df.iloc[:num_train_samples,:])
-        valid_dfs.append(class_df.iloc[num_train_samples:,:])
+        # valid_dfs.append(class_df.iloc[num_train_samples:,:])
+        valid_dfs.append(class_df.iloc[num_train_samples:num_train_samples+num_valid_samples,:])
     return pd.concat(train_dfs,axis='rows').sample(frac=1), pd.concat(valid_dfs,axis='rows').sample(frac=1)
     
 def create_dataset(model_data, img_h, img_w, mode, classes, aug_data):
@@ -192,8 +138,6 @@ def create_dataset(model_data, img_h, img_w, mode, classes, aug_data):
     train_dicts_list = []
     valid_dicts_list = []
     train, valid = create_train_valid_test_data(model_data)
-    # add enriched data to train
-    train = pd.concat([train, enriched_data_df],axis='rows')
     if aug_data:
         print(f"train data before aug: {train.shape[0]}\n{train['Class'].value_counts()}")
         train = data_handler.augment_data(train,(img_h,img_w), num_augs=300)
@@ -227,7 +171,7 @@ def create_dataset(model_data, img_h, img_w, mode, classes, aug_data):
     elif mode=='valid': return valid_dicts_list
 
 # create train and valid data
-train_list = create_dataset(model_data, img_h=img_h, img_w=img_w, mode='train', classes=classes, aug_data=True)
+train_list = create_dataset(model_data, img_h=img_h, img_w=img_w, mode='train', classes=classes, aug_data=False)
 valid_list = create_dataset(model_data, img_h=img_h, img_w=img_w, mode='valid', classes=classes, aug_data=False)
 def get_train_data():
     return train_list
@@ -248,7 +192,7 @@ MetadataCatalog.get("valid").thing_classes = classes
 ##############################################################################################################################################
 # train model
 cfg = get_cfg()
-cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/retinanet_R_50_FPN_3x.yaml"))
+cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/retinanet_R_101_FPN_3x.yaml"))
 cfg.DATASETS.TRAIN = ("train",)
 cfg.DATASETS.TEST = ("valid",)
 #cfg.MODEL.PIXEL_MEAN = data_mean
@@ -268,16 +212,18 @@ cfg.INPUT.MAX_SIZE_TEST = img_w
 
 cfg.TEST.AUG.FLIP = False
 cfg.DATALOADER.NUM_WORKERS = 8
-cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/retinanet_R_50_FPN_3x.yaml")  
+cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/retinanet_R_101_FPN_3x.yaml")  
 cfg.SOLVER.IMS_PER_BATCH = 2
 cfg.SOLVER.BASE_LR = 1e-3  
 cfg.SOLVER.LR_SCHEDULER_NAME = "WarmupCosineLR"
 #cfg.MODEL.RETINANET.IOU_THRESHOLDS = [0.4, 0.5]
-cfg.SOLVER.MAX_ITER = 20000
+cfg.SOLVER.MAX_ITER = 15000
+cfg.MODEL.BACKBONE.FREEZE_AT=1
 cfg.MODEL.RETINANET.NUM_CLASSES = len(classes)
 # cfg.MODEL.ROI_HEADS.NUM_CLASSES = len(data_handler.class_names)
 
 cfg.OUTPUT_DIR =str(model_dir)
+cfg.MODEL.RESNETS.DEFORM_ON_PER_STAGE = [True, True, True, True]
 os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
 trainer = DefaultTrainer(cfg) 
 trainer.resume_or_load(resume=False)
@@ -289,9 +235,28 @@ val_loader = build_detection_test_loader(cfg, "valid")
 print(trainer.test(cfg, trainer.model, evaluator))
 
 
+
+# |  category  | #instances   |  category  | #instances   |  category  | #instances   |
+# |:----------:|:-------------|:----------:|:-------------|:----------:|:-------------|
+# |  PF08239   | 3219         |  PF05257   | 1147         |  PF00959   | 1595         |
+# |  PF00182   | 1312         |  PF00704   | 1453         |  PF05838   | 766          |
+# |  PF01510   | 4782         |  PF04965   | 2210         |  PF01183   | 2142         |
+# |  PF01551   | 6385         |  PF00722   | 4388         |  PF01435   | 5515         |
+# |  PF00246   | 948          |  PF00814   | 4742         |  PF06347   | 972          |
+# |  PF01520   | 2922         |            |              |            |              |
+# |   total    | 44498        |            |              |            |              |
+
+# | category   | AP    | category   | AP     | category   | AP     |
+# |:-----------|:------|:-----------|:-------|:-----------|:-------|
+# | PF08239    | 5.648 | PF05257    | 1.778  | PF00959    | 11.808 |
+# | PF00182    | 3.012 | PF00704    | 7.506  | PF05838    | 3.817  |
+# | PF01510    | 7.549 | PF04965    | 46.490 | PF01183    | 6.736  |
+# | PF01551    | 2.416 | PF00722    | 7.048  | PF01435    | 16.833 |
+# | PF00246    | 4.915 | PF00814    | 14.368 | PF06347    | 3.958  |
+# | PF01520    | 5.179 |            |        |            |        |
+
+
 # | category   | AP     | category   | AP     | category   | AP     |
 # |:-----------|:-------|:-----------|:-------|:-----------|:-------|
-# | PF03245    | 95.619 | PF16754    | 80.070 | PF11860    | 92.857 |
-# | PF13702    | 94.545 | PF08460    | 75.589 | PF01374    | 86.743 |
-# | PF18013    | 94.680 |            |        |            |        |
-
+# | PF08239    | 19.131 | PF01510    | 32.684 | PF00246    | 19.971 |
+# | PF06347    | 14.535 |            |        |            |        |

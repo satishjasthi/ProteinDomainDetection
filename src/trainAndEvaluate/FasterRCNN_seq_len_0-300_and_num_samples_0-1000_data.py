@@ -289,7 +289,7 @@ val_loader = build_detection_test_loader(cfg, "valid")
 print(trainer.test(cfg, trainer.model, evaluator))
 
 
-# | category   | AP     | category   | AP     | category   | AP     |
+
 # |:-----------|:-------|:-----------|:-------|:-----------|:-------|
 # | PF03245    | 95.619 | PF16754    | 80.070 | PF11860    | 92.857 |
 # | PF13702    | 94.545 | PF08460    | 75.589 | PF01374    | 86.743 |

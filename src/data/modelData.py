@@ -83,7 +83,7 @@ class ObjectDetection:
     def create_protein_domain_df(self):
         data = {}
         for clss in self.class_names:
-            print(f'Fetching data from FASTA files for {clss}')
+            # print(f'Fetching data from FASTA files for {clss}')
             cls_name, sub_cls_id = clss.split('-')
             full_sequence_data = self.data_dir/f'PfamData/{cls_name}___full_sequence_data/{cls_name}-{sub_cls_id}___full_sequence_data.fasta'
             domain_data = self.data_dir/f'PfamData/{cls_name}___full_sequence_data/{cls_name}-{sub_cls_id}___domain_data.fasta'     
@@ -120,18 +120,17 @@ class ObjectDetection:
         print(f'Dropped {num_total_rows - data_df.shape[0]} number of duplicates based on sequences')
         
         data_df.to_csv(self.data_dir/f'PfamData/model_data.csv',index=False)
-        print('Class distribution: \n')
-        print(data_df['Class'].value_counts())
+        # print('Class distribution: \n')
+        # print(data_df['Class'].value_counts())
         return data_df
     
     @staticmethod
     def get_bucketised_data( data_df, seq_len_bucket, num_samples_bucket):
-        print(f"Fetching data with sequence len in btw {seq_len_bucket} and class with num samples btw {num_samples_bucket}")
-        class_freq_map = dict(data_df['Class'].value_counts())       
+        print(f"Fetching data with sequence len in btw {seq_len_bucket} and class with num samples btw {num_samples_bucket}")       
         # filter data based on seq len
         seq_len_df = data_df[(data_df['SeqLen']>=seq_len_bucket[0]) & (data_df['SeqLen']<seq_len_bucket[1])]
         assert max(seq_len_df['SeqLen']) < seq_len_bucket[1] and min(seq_len_df['SeqLen']) >= seq_len_bucket[0]
-        
+        class_freq_map = dict(seq_len_df['Class'].value_counts())
         # filter based on sample size for classes
         required_classes = [class_name for class_name in class_freq_map.keys() if class_freq_map[class_name]>=num_samples_bucket[0] and class_freq_map[class_name]<num_samples_bucket[1]]
         samples_df = seq_len_df[seq_len_df['Class'].isin(required_classes)]
