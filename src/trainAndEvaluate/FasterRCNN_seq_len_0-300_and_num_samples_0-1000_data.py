@@ -96,6 +96,10 @@ bucket_df = data_handler.get_bucketised_data(protein_domain_data, seq_len_bucket
 class_freq_map = dict(bucket_df['Class'].value_counts())
 classes = [cls for cls in list(bucket_df['Class'].unique()) if class_freq_map[cls]>50]
 bucket_df = bucket_df[bucket_df['Class'].isin(classes)]
+#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! ! EXP !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+bucket_df = bucket_df[bucket_df['Class'].isin(['PF08460', 'PF01374', 'PF16754'])]
+classes = list(bucket_df['Class'].unique())
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 
 bucket_df.to_csv(ProjectRoot/f"data/PfamData/seq_len_{'-'.join([str(x) for x in seq_len_bucket])}_and_num_samples_{'-'.join([str(x) for x in num_sample_bucket])}_data.csv",index=False)
 
 
@@ -105,6 +109,8 @@ data_handler.create_bucket_image_data(bucket_df, seq_len_bucket, num_sample_buck
 # print config data summary
 images_dir = ProjectRoot/f"data/PfamData/{config_name}_images"
 model_data =  pd.read_csv(ProjectRoot/f"data/PfamData/{config_name}_data.csv")
+
+
 print(f"Selected {model_data['Class'].nunique()} classes:\n{model_data['Class'].unique()}")
 
 
@@ -248,7 +254,7 @@ MetadataCatalog.get("valid").thing_classes = classes
 ##############################################################################################################################################
 # train model
 cfg = get_cfg()
-cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/retinanet_R_50_FPN_3x.yaml"))
+cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_DC5_3x.yaml"))
 cfg.DATASETS.TRAIN = ("train",)
 cfg.DATASETS.TEST = ("valid",)
 #cfg.MODEL.PIXEL_MEAN = data_mean
@@ -268,14 +274,14 @@ cfg.INPUT.MAX_SIZE_TEST = img_w
 
 cfg.TEST.AUG.FLIP = False
 cfg.DATALOADER.NUM_WORKERS = 8
-cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/retinanet_R_50_FPN_3x.yaml")  
+cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/faster_rcnn_R_50_DC5_3x.yaml")  
 cfg.SOLVER.IMS_PER_BATCH = 2
 cfg.SOLVER.BASE_LR = 1e-3  
 cfg.SOLVER.LR_SCHEDULER_NAME = "WarmupCosineLR"
 #cfg.MODEL.RETINANET.IOU_THRESHOLDS = [0.4, 0.5]
-cfg.SOLVER.MAX_ITER = 20000
-cfg.MODEL.RETINANET.NUM_CLASSES = len(classes)
-# cfg.MODEL.ROI_HEADS.NUM_CLASSES = len(data_handler.class_names)
+cfg.SOLVER.MAX_ITER = 15000
+cfg.MODEL.ROI_HEADS.NUM_CLASSES = len(classes)
+
 
 cfg.OUTPUT_DIR =str(model_dir)
 os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
@@ -290,8 +296,11 @@ print(trainer.test(cfg, trainer.model, evaluator))
 
 
 
-# |:-----------|:-------|:-----------|:-------|:-----------|:-------|
-# | PF03245    | 95.619 | PF16754    | 80.070 | PF11860    | 92.857 |
-# | PF13702    | 94.545 | PF08460    | 75.589 | PF01374    | 86.743 |
-# | PF18013    | 94.680 |            |        |            |        |
+
+
+
+
+
+
+
 

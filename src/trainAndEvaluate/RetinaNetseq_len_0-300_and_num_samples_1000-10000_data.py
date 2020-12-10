@@ -200,14 +200,14 @@ cfg.DATASETS.TEST = ("valid",)
 cfg.INPUT.RANDOM_FLIP = "vertical"
 cfg.TEST.DETECTIONS_PER_IMAGE = 100
 
-cfg.INPUT.MIN_SIZE_TRAIN = (img_h,)
+# cfg.INPUT.MIN_SIZE_TRAIN = (img_h,)
 cfg.INPUT.MIN_SIZE_TRAIN_SAMPLING = "choice"
 # Maximum size of the side of the image during training
-cfg.INPUT.MAX_SIZE_TRAIN = img_w
+# cfg.INPUT.MAX_SIZE_TRAIN = img_w
 # Size of the smallest side of the image during testing. Set to zero to disable resize in testing.
-cfg.INPUT.MIN_SIZE_TEST = img_h
+# cfg.INPUT.MIN_SIZE_TEST = img_h
 # Maximum size of the side of the image during testing
-cfg.INPUT.MAX_SIZE_TEST = img_w
+# cfg.INPUT.MAX_SIZE_TEST = img_w
 
 
 cfg.TEST.AUG.FLIP = False
@@ -217,13 +217,12 @@ cfg.SOLVER.IMS_PER_BATCH = 2
 cfg.SOLVER.BASE_LR = 1e-3  
 cfg.SOLVER.LR_SCHEDULER_NAME = "WarmupCosineLR"
 #cfg.MODEL.RETINANET.IOU_THRESHOLDS = [0.4, 0.5]
-cfg.SOLVER.MAX_ITER = 15000
+cfg.SOLVER.MAX_ITER = 3000
 cfg.MODEL.BACKBONE.FREEZE_AT=1
 cfg.MODEL.RETINANET.NUM_CLASSES = len(classes)
-# cfg.MODEL.ROI_HEADS.NUM_CLASSES = len(data_handler.class_names)
+
 
 cfg.OUTPUT_DIR =str(model_dir)
-cfg.MODEL.RESNETS.DEFORM_ON_PER_STAGE = [True, True, True, True]
 os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
 trainer = DefaultTrainer(cfg) 
 trainer.resume_or_load(resume=False)

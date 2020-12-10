@@ -6,10 +6,71 @@ import numpy as np
 from Bio import SeqIO
 from functools import partial
 from imgaug import augmenters as iaa
+from tqdm import tqdm
 
 ProjectRoot = Path(__file__).resolve().parent.parent.parent
 
 
+import random, string
+import numpy as np
+
+
+def generate_acid_color_proportions():
+    min_prop=10
+    sum_prop = 100
+    black_threshold = 40
+    white_threshold=40
+    possible_props = list(range(0,100))
+    choosen_props = []
+    acid_color_prop_maps = {}
+    for i in range(len(string.ascii_uppercase)):
+        flag=True
+        acid = string.ascii_uppercase[i]
+        while flag:
+            first_prop = random.choice(possible_props)
+            second_prop = random.choice(possible_props)
+            third_prop = random.choice(possible_props)
+            if first_prop +  second_prop + third_prop == sum_prop and (first_prop, second_prop, third_prop) not in choosen_props and min(first_prop, second_prop, third_prop)>=min_prop and first_prop<white_threshold and third_prop<black_threshold:
+            
+                flag=False
+                assert (first_prop, second_prop, third_prop) not in choosen_props
+                choosen_props.append((first_prop, second_prop, third_prop))
+                acid_color_prop_maps[acid] = (first_prop, second_prop, third_prop)
+
+    return acid_color_prop_maps
+
+
+def sequenc2histogram(seq, img_h, img_w):
+    """
+    Converts seq to image inthe form of hist
+    """
+    acid_color_prop_maps = generate_acid_color_proportions()
+    acid_width = 1
+    # img_h = img_h
+    img_w = len(seq)*acid_width
+    img = np.full((img_h, img_w, 3),(500,500,500))
+    for index in range(img_w):
+        if index < len(seq):
+            acid = seq[index]
+            color_props = acid_color_prop_maps[acid]
+            white = (220,220,220)
+            black = (0,0,0)
+            gray = (90,90,90)
+            first_split = round(int(img_h*color_props[0]*0.01))
+            second_split = round(int(img_h*color_props[1]*0.01))
+            img[:first_split, index*acid_width:index*acid_width*2, :] = white
+            img[first_split:first_split+second_split, index*acid_width:index*acid_width*2, :] = gray
+            img[first_split+second_split:, index*acid_width:index*acid_width*2, :] = black
+        else:
+            img[:,index,:] = (255,255,255)
+    return img
+
+def generate_sequence2histogram_images(item=None):
+    
+    sequence,img_name, img_h, img_w = item
+    image = sequenc2histogram(sequence, img_h, img_w )
+    image = Image.fromarray(image.astype(np.uint8))
+    image.save(img_name)
 
 def create_protein_seq_image(item=None, color_map=None):
     """
@@ -79,6 +140,34 @@ class ObjectDetection:
         Image.fromarray(images_aug.astype(np.uint8)).save(aug_img_pth)
         return str(aug_img_pth)
                 
+    def handle_multiple_domains(self, data_df):
+        print('Handling sequences with multiple domains')
+        # get sequences with multiple domains
+        multi_domain_seqs = data_df[data_df.duplicated(subset=['Sequence'])]['Sequence']
+        records = []
+        for seq in tqdm(multi_domain_seqs):
+            seq_df = data_df[data_df['Sequence']==seq]
+            dom_pos_list = seq_df['dom_pos']
+            dom_len_list = seq_df['dom_len']
+            dom_list = seq_df['dom']
+            records.append({'id':seq_df['id'].unique()[0],
+                            'name': seq_df['name'].unique()[0],
+                            'Sequence': seq_df['Sequence'].unique()[0],
+                            'Class': '_'.join(seq_df['Class'].unique()),
+                            'SeqLen': seq_df['SeqLen'].unique()[0],
+                            'SuperClass': '_'.join(seq_df['SuperClass'].unique()),
+                            'img_pth': seq_df['img_pth'].unique()[0],
+                            'dom_pos': dom_pos_list,
+                            'dom_len': dom_len_list,
+                            'dom': dom_list,
+                            })
+        # drop all duplicates
+        data_df.drop_duplicates(subset=['Sequence'], keep=False, inplace=True)
+        data_df = pd.concat([data_df, pd.DataFrame(data=records)],axis='rows')#.sample(frac=1)
+        #data_df.reset_index(drop=True, inplace=True)
+        return data_df
+        
+        
 
     def create_protein_domain_df(self):
         data = {}
@@ -98,26 +187,32 @@ class ObjectDetection:
                 data[record.id]['SeqLen']= len(record.seq._data)
                 data[record.id]['SuperClass'] = cls_name
                 assert 'PF' in data[record.id]['Class']
+                data[record.id]['dom_pos'] = []
+                data[record.id]['dom_len'] = []
+                data[record.id]['dom'] = []
                 data[record.id]['img_pth'] = self.config_images_dir/f"img_{record.id}_{data[record.id]['Class']}_{ data[record.id]['SuperClass']}.png"
                 
             for record in SeqIO.parse(domain_data, 'fasta'):
                 id_ = record.id.split('/')[0]
                 # to ensure the indexing of the domains starts at 0 1 is sub
-                data[id_]['dom_pos'] = [int(pos)-1 for  pos in record.id.split('/')[-1].split('-')]   
-                data[id_]['dom_len'] = len(record.seq._data)
-                data[id_]['dom'] = record.seq._data
+                # if id_ == 'A0A1B0T6L3_9CAUD':
+                #     print('h')
+                data[id_]['dom_pos'].append([int(pos)-1 for  pos in record.id.split('/')[-1].split('-')] )
+                data[id_]['dom_len'].append(len(record.seq._data))
+                data[id_]['dom'].append(record.seq._data)
                 
         data_df = pd.DataFrame(data=data.values())
         tot_num_rows = data_df.shape[0]
         # because this class has just one sample
         data_df = data_df[data_df['Class']!='PF13647']
-        
+   
         data_df['SeqLen'] = data_df['Sequence'].apply(lambda x: len(x))
         # so that none of the domain pos is missing
         assert data_df['dom_pos'].isna().sum() == 0
         num_total_rows = data_df.shape[0]
-        data_df = data_df.drop_duplicates(subset=['Sequence'])
-        print(f'Dropped {num_total_rows - data_df.shape[0]} number of duplicates based on sequences')
+        # didnt drop duplicates because they will have multiple domains
+        # data_df = data_df.drop_duplicates(subset=['Sequence'])
+        # print(f'Dropped {num_total_rows - data_df.shape[0]} number of duplicates based on sequences')
         
         data_df.to_csv(self.data_dir/f'PfamData/model_data.csv',index=False)
         # print('Class distribution: \n')
@@ -140,7 +235,7 @@ class ObjectDetection:
 
 
     def create_bucket_image_data(self, data_df, seq_len_bucket, num_samples_bucket):
-        img_h, img_w = 224, seq_len_bucket[1]
+        img_h, img_w = 64, seq_len_bucket[1]
         print(f'Genreating  images of dim {img_h}x{img_w} data bucket with sequence len in btw {seq_len_bucket} and class with num samples btw {num_samples_bucket}')
         partial_create_protein_seq_image = partial(create_protein_seq_image,color_map=self.color_map)
         images_folder_path = ProjectRoot/f"data/PfamData/seq_len_{'-'.join([str(x) for x in seq_len_bucket])}_and_num_samples_{'-'.join([str(x) for x in num_samples_bucket])}_images"
@@ -150,6 +245,40 @@ class ObjectDetection:
         items = [(sequence, img_name, img_h, img_w ) for sequence, img_name in zip(data_df['Sequence'],data_df['img_pth'])]
         with multiprocessing.Pool(processes=multiprocessing.cpu_count()-1) as p:
             p.map(partial_create_protein_seq_image,items)
+            
+    def create_class_image_data(self, data_df, max_seq_len, class_name):
+        img_h, img_w = 64, max_seq_len
+        print(f'Genreating  images of dim {img_h}x{img_w} for {class_name} data')
+        partial_create_protein_seq_image = partial(create_protein_seq_image,color_map=self.color_map)
+        images_folder_path = ProjectRoot/f"data/PfamData/{class_name}_images"
+        if not images_folder_path.exists():
+            images_folder_path.mkdir(parents=True, exist_ok=True)
+        data_df['img_pth'] = data_df['img_pth'].apply(lambda x: str(x).replace('images_224', f"{class_name}_images"))
+        items = [(sequence, img_name, img_h, img_w ) for sequence, img_name in zip(data_df['Sequence'],data_df['img_pth'])]
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count()-1) as p:
+            p.map(partial_create_protein_seq_image,items)
+            
+    def create_bucket_sequence2histogram(self, data_df, seq_len_bucket, num_samples_bucket):
+        img_h, img_w = 224, seq_len_bucket[1]
+        print(f'Genreating  images of dim {img_h}x{img_w} data bucket with sequence len in btw {seq_len_bucket} and class with num samples btw {num_samples_bucket}')
+        images_folder_path = ProjectRoot/f"data/PfamData/seq_len_{'-'.join([str(x) for x in seq_len_bucket])}_and_num_samples_{'-'.join([str(x) for x in num_samples_bucket])}_images"
+        if not images_folder_path.exists():
+            images_folder_path.mkdir(parents=True, exist_ok=True)
+        data_df['img_pth'] = data_df['img_pth'].apply(lambda x: str(x).replace('images_224', f"seq_len_{'-'.join([str(x) for x in seq_len_bucket])}_and_num_samples_{'-'.join([str(x) for x in num_samples_bucket])}_images"))
+        items = [(sequence, img_name, img_h, img_w ) for sequence, img_name in zip(data_df['Sequence'],data_df['img_pth'])]
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count()-1) as p:
+            p.map(generate_sequence2histogram_images,items)
+            
+    def create_yolo_sequence2histogram(self, data_df, img_h, img_w):
+        print(f'Genreating  images of dim {img_h}x{img_w} data ')
+        images_folder_path = ProjectRoot/f"Yolo/yolov5/data/PfamData/images"
+        if not images_folder_path.exists():
+            images_folder_path.mkdir(parents=True, exist_ok=True)
+        data_df['img_pth'] = data_df['img_pth'].apply(lambda x: Path('/home/satish27may/ProteinDomainDetection/Yolo/yolov5/data/PfamData/images')/f"{Path(x).name}")
+        items = [(sequence, img_name, img_h, img_w ) for sequence, img_name in zip(data_df['Sequence'],data_df['img_pth'])]
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count()-1) as p:
+            p.map(generate_sequence2histogram_images,items)
+            
     
     def augment_data(self, data_df,dim, num_augs):
         class_freq = dict(data_df['Class'].value_counts())
@@ -174,7 +303,7 @@ class ObjectDetection:
                     
             
 if __name__ == "__main__":
-    classes = ['Lysozyme-PF03245',
+    all_classes = ['Lysozyme-PF03245',
     'Lysozyme-PF16754',
     'Lysozyme-PF11860',
     'Lysozyme-PF13702',
@@ -204,13 +333,20 @@ if __name__ == "__main__":
     'SH3_3-PF08239',
     'SH3_5-PF08460',
     'LysM-PF01476']
-    o = ObjectDetection(class_names=classes, img_dim=224)
-    df = o.create_protein_domain_df()
-    seq_length_buckets = [(0, 300), (300, 600), (600, 1000)]
-    num_samples_bucket = [(0, 1000), (1000, 10000), (10000, 100000)]
-    for seq_len_bucket in seq_length_buckets:
-        for num_sample_bucket in num_samples_bucket:
-            bucket_df = o.get_bucketised_data(df, seq_len_bucket, num_sample_bucket)
-            bucket_df.to_csv(ProjectRoot/f"data/PfamData/seq_len_{'-'.join([str(x) for x in seq_len_bucket])}_and_num_samples_{'-'.join([str(x) for x in num_sample_bucket])}_data.csv",index=False)
-            o.create_bucket_image_data(bucket_df, seq_len_bucket, num_sample_bucket)
-    
+
+    # SH3_4 and CHAP
+    all_classes= ['SH3_4-PF06347']
+    # Lysozyme and SH3_4
+    # subset_classes = ['PF01374', 'PF06347']
+    data_handler = ObjectDetection(class_names=all_classes)
+    protein_domain_data = data_handler.create_protein_domain_df()
+
+    # create data df for choosen config
+    bucket_df = data_handler.get_bucketised_data(protein_domain_data, (0,300), (1000, 10000))
+    class_freq_map = dict(bucket_df['Class'].value_counts())
+    classes = [cls for cls in list(bucket_df['Class'].unique()) if class_freq_map[cls]>50]
+    bucket_df = bucket_df[bucket_df['Class'].isin(classes)]
+    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    bucket_df = bucket_df[bucket_df['Class'].isin(subset_classes)]
+    classes = list(bucket_df['Class'].unique())
+    data_handler.create_bucket_image_data(bucket_df, (0,300), (1000, 10000))
