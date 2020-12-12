@@ -76,51 +76,39 @@ class Data:
             index = index+10
         
     def create_protein_domain_data(self):
-        records = []
-        domain_data_records=[]
-        seq_data_records = []
+        data = {}
         for class_name in self.classes:
             cls_img_dir = self.images_dir/f"{class_name}"
             cls_img_dir.mkdir(exist_ok=True, parents=True)
             super_class, class_id = class_name.split('-')
             full_seq_data = self.data_dir/f'PfamData/{super_class}___full_sequence_data/{class_name}___full_sequence_data.fasta'
-            dom_data = self.data_dir/f'PfamData/{super_class}___full_sequence_data/{class_name}___domain_data.fasta'
-            # parse sequences of all classes
+            dom_seq_data = self.data_dir/f'PfamData/{super_class}___full_sequence_data/{class_name}___domain_data.fasta'
             for record in SeqIO.parse(full_seq_data, 'fasta'):
-                seq_data_records.append({'Sequence': record.seq._data,
-                                        'name': record.name,
-                                        'id': record.id,
-                                        'Class':class_id,
-                                        'SeqLen':len(record.seq._data),
-                                        'SuperClass':super_class}
-                                      )
-            
-            # parse domains of all classes
-            for record in SeqIO.parse(dom_data, 'fasta'):
-                domain_data_records.append({'id':record.id.split('/')[0],
-                                            'dom':record.seq._data,
-                                            'dom_pos':tuple([int(pos)-1 for  pos in record.id.split('/')[-1].split('-')]),
-                                            'dom_len':len(record.seq._data)
-                                            })
-        seq_data_df = pd.DataFrame(data=seq_data_records)
-        domain_data_df = pd.DataFrame(data=domain_data_records)
-        all_data = pd.merge(seq_data_df, domain_data_df,how='inner',on='id')
-        all_data.drop_duplicates(inplace=True)
+                data[record.id] = {}
+                data[record.id]['id'] = record.id
+                data[record.id]['name'] = record.name
+                data[record.id]['Sequence'] = record.seq._data
+                data[record.id]['Class'] = class_id
+                data[record.id]['SeqLen']= len(record.seq._data)
+                data[record.id]['SuperClass'] = super_class
+                assert 'PF' in data[record.id]['Class']
+                data[record.id]['dom_pos'] = []
+                data[record.id]['dom_len'] = []
+                data[record.id]['dom'] = []
+                data[record.id]['img_pth'] = self.images_dir/f"{cls_img_dir}/img_{record.id}_{class_id}_{super_class}.png"
+                
+            for record in SeqIO.parse(dom_seq_data, 'fasta'):
+                id_ = record.id.split('/')[0]
+                # to ensure the indexing of the domains starts at 0 1 is sub
+                data[id_]['dom_pos'].append([int(pos)-1 for  pos in record.id.split('/')[-1].split('-')] )
+                data[id_]['dom_len'].append(len(record.seq._data))
+                data[id_]['dom'].append(record.seq._data)
         
-        for sequence in all_data['Sequence'].unique():
-            sequence_df = all_data[all_data['Sequence']==sequence]
-            
-            records.append({'Sequence':sequence,
-                            'Class':'||'.join(sequence_df['Class']),
-                            'SuperClass':'||'.join(sequence_df['SuperClass']),
-                            'name': '||'.join(sequence_df['name']),
-                            'SeqLen':sequence_df['SeqLen'].tolist()[0],
-                            'dom':sequence_df['dom'].tolist(),
-                            'dom_pos':sequence_df['dom_pos'].tolist(),
-                            'dom_len':sequence_df['dom_len'].tolist(),
-                            'img_pth':self.images_dir/f"{'_'.join(self.classes)}_{'_'.join(sequence_df['name'])}.png",
-                            })
-        return pd.DataFrame(data=records)
+        data_df = pd.DataFrame(data=data.values())
+        print("Class distribution after creating protein domain data from fasta files: \n")
+        print(data_df['Class'].value_counts())
+        assert data_df['dom_pos'].isna().sum() == 0
+        return data_df
     
     def create_protein_seq_images(self, data_df, img_h, img_w):
         print(f"Generating images of dim {img_h}x{img_w} for classes: {list(data_df['Class'].unique())}")
@@ -153,7 +141,7 @@ class Detectron:
         os.system(f"! trash-put {str(self.model_dir)}")
         self.model_dir.mkdir(parents=True, exist_ok=True)
         self.cfg = get_cfg()
-        self.cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/retinanet_R_50_FPN_3x.yaml"))
+        self.cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"))
         self.cfg.DATASETS.TRAIN = ("train",)
         self.cfg.DATASETS.TEST = ("valid",)
         self.cfg.INPUT.RANDOM_FLIP = "vertical"
@@ -167,26 +155,23 @@ class Detectron:
 
         self.cfg.TEST.AUG.FLIP = False
         self.cfg.DATALOADER.NUM_WORKERS = 8
-        self.cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/retinanet_R_50_FPN_3x.yaml")  
-        self.cfg.SOLVER.IMS_PER_BATCH = 8
-        self.cfg.SOLVER.BASE_LR = 9e-4  
+        self.cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")  
+        self.cfg.SOLVER.IMS_PER_BATCH = 2
+        # self.cfg.SOLVER.BASE_LR = 9e-4  
+        self.cfg.SOLVER.BASE_LR = 1e-3
         self.cfg.SOLVER.LR_SCHEDULER_NAME = "WarmupCosineLR"
-        # self.cfg.SOLVER.MAX_ITER = 3000
-        self.cfg.MODEL.RETINANET.NUM_CLASSES = len(classes)
+        self.cfg.MODEL.ROI_HEADS.NUM_CLASSES = len(classes)
 
         # exp
         self.cfg.MODEL.RESNETS.NORM = "BN"
-        # self.cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA =0.5 #didn't work
-        self.cfg.MODEL.RETINANET.IOU_THRESHOLDS = [0.4, 0.99]
         
         self.cfg.OUTPUT_DIR =str(self.model_dir)
         os.makedirs(self.cfg.OUTPUT_DIR, exist_ok=True)
         
     def create_train_valid_data(self, data):
         train_dfs,valid_dfs = [],[],
-        for class_name in self.classes:
-            class_id = class_name.split('-')[-1]
-            class_df = data[data['Class'].str.contains(class_id)].sample(frac=1)
+        for class_name in data['Class'].unique():
+            class_df = data[data['Class']==class_name].sample(frac=1)
             num_samples = class_df.shape[0]
             num_train_samples = int(round(num_samples*0.7))
             train_dfs.append(class_df.iloc[:num_train_samples,:])
@@ -202,14 +187,13 @@ class Detectron:
         
     def register_custom_data(self, data, mode, img_h, img_w):
         print(f"Registring {mode} data.......")
-        print(f"Classes selected: {self.classes}")
-        # print(f"SuperClasses selected: {data['SuperClass'].unique()}")
+        print(f"Classes selected: {data['Class'].unique()}")
+        print(f"SuperClasses selected: {data['SuperClass'].unique()}")
         data = data.reset_index(drop=True)
-        self.C2I = {class_name:index for index, class_name in enumerate(self.classes)}
+        self.C2I = {class_name:index for index, class_name in enumerate(data['Class'].unique())}
         dicts_list = []
         data = data.reset_index(drop=True)
         for index in tqdm.tqdm(range(data.shape[0])):
-            class_list = data['Class']['index'].split('||')
             pil_img = Image.open(data['img_pth'][index])
             img_w, img_h = pil_img.size
             dom_pos_list = data['dom_pos'][index]
@@ -219,7 +203,7 @@ class Detectron:
                     x1,x2 = dom_pos_list[dom_index]
                     annts.append({'bbox':[x1, 0, x2, img_h],
                                             'bbox_mode':BoxMode.XYXY_ABS,
-                                            'category_id':  self.C2I[class_list[dom_index]],
+                                            'category_id':  self.C2I[data['Class'][index]],
                                             })
             elif len(dom_pos_list)==1:
                 x1,x2 = dom_pos_list[0]
@@ -255,7 +239,7 @@ class Detectron:
         
     def inference(self):
         self.cfg.MODEL.WEIGHTS = os.path.join(self.cfg.OUTPUT_DIR, "model_final.pth")  # path to the model we just trained
-        self.cfg.MODEL.RETINANET.SCORE_THRESH_TEST = 0.99   # set a custom testing threshold
+        self.cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.9   # set a custom testing threshold
         predictor = DefaultPredictor(self.cfg)
         try:
             # calculate recall 
@@ -337,29 +321,29 @@ class Detectron:
 if __name__ == "__main__":
     all_classes = ['Amidase_2-PF01510',
     'Amidase_3-PF01520',]
-    classes=['CHAP-PF05257', 'SH3_3-PF08239', 'SH3_4-PF06347']# 'SH3_4-PF06347','SH3_5-PF08460']
+    classes=['SH3_4-PF06347']#]#'SH3_5-PF08460'
             # 'SH3_3-PF08239',
             # 'SH3_5-PF08460',
             # 'LysM-PF01476']
-    img_h, img_w = 64, 300 # padding is also controlled by this img_w
-    seq_len =300   
+    img_h, img_w = 64, 1000 # padding is also controlled by this img_w
+    seq_len =1000   
     seq_buckets = (0, img_w) 
 
     data_block = Data(classes)
     protein_data = data_block.create_protein_domain_data()
     protein_data = protein_data[protein_data['SeqLen']<seq_len]
-    # data_block.create_protein_seq_images(protein_data, img_h, img_w)
-    # # data_block.create_protein_seq_len_images(protein_data, img_h, img_w)
+    data_block.create_protein_seq_images(protein_data, img_h, img_w)
+    # data_block.create_protein_seq_len_images(protein_data, img_h, img_w)
 
-    # model_block = Detectron(classes=classes, model_dir=ProjectRoot/f"models/{'_'.join(classes)}_{seq_buckets[0]}_{seq_buckets[1]}")
-    # model_block.cfg.SOLVER.MAX_ITER = 3000
-    # train_data, valid_data = model_block.create_train_valid_data(protein_data)
-    # model_block.register_custom_data(train_data, 'train', img_h, img_w)
-    # model_block.register_custom_data(valid_data, 'valid', img_h, img_w)
-    # trainer = model_block.train()
-    # model_block.evaluate(trainer)
-    # predictor = model_block.inference()
-    # #class_index = all_classes.index(classes[0])
-    # #del all_classes[class_index]
-    # model_block.test_for_open_set(protein_data, all_classes, img_h, img_w, predictor)
+    model_block = Detectron(classes=classes, model_dir=ProjectRoot/f"models/{'_'.join(classes)}_{seq_buckets[0]}_{seq_buckets[1]}_Faster_RCNN_FPN")
+    model_block.cfg.SOLVER.MAX_ITER = 3000
+    train_data, valid_data = model_block.create_train_valid_data(protein_data)
+    model_block.register_custom_data(train_data, 'train', img_h, img_w)
+    model_block.register_custom_data(valid_data, 'valid', img_h, img_w)
+    trainer = model_block.train()
+    model_block.evaluate(trainer)
+    predictor = model_block.inference()
+    #class_index = all_classes.index(classes[0])
+    #del all_classes[class_index]
+    model_block.test_for_open_set(protein_data, all_classes, img_h, img_w, predictor)
     

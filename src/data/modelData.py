@@ -335,18 +335,36 @@ if __name__ == "__main__":
     'LysM-PF01476']
 
     # SH3_4 and CHAP
-    all_classes= ['SH3_4-PF06347']
+    # all_classes= ['SH3_4-PF06347']
     # Lysozyme and SH3_4
     # subset_classes = ['PF01374', 'PF06347']
     data_handler = ObjectDetection(class_names=all_classes)
     protein_domain_data = data_handler.create_protein_domain_df()
+    protein_domain_data.to_csv('/home/satish27may/ProteinDomainDetection/trash/protein_data.csv',index=False)
 
-    # create data df for choosen config
-    bucket_df = data_handler.get_bucketised_data(protein_domain_data, (0,300), (1000, 10000))
-    class_freq_map = dict(bucket_df['Class'].value_counts())
-    classes = [cls for cls in list(bucket_df['Class'].unique()) if class_freq_map[cls]>50]
-    bucket_df = bucket_df[bucket_df['Class'].isin(classes)]
-    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    bucket_df = bucket_df[bucket_df['Class'].isin(subset_classes)]
-    classes = list(bucket_df['Class'].unique())
-    data_handler.create_bucket_image_data(bucket_df, (0,300), (1000, 10000))
+    # # create data df for choosen config
+    # bucket_df = data_handler.get_bucketised_data(protein_domain_data, (0,300), (1000, 10000))
+    # class_freq_map = dict(bucket_df['Class'].value_counts())
+    # classes = [cls for cls in list(bucket_df['Class'].unique()) if class_freq_map[cls]>50]
+    # bucket_df = bucket_df[bucket_df['Class'].isin(classes)]
+    # # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    # bucket_df = bucket_df[bucket_df['Class'].isin(subset_classes)]
+    # classes = list(bucket_df['Class'].unique())
+    # data_handler.create_bucket_image_data(bucket_df, (0,300), (1000, 10000))
+    
+    'SH3_3-PF08239','peptidase-PF01433','Lysozyme-PF01183','Lysozyme-PF05838','Lysozyme-PF01374','Lysozyme-PF11860'
+    'Lysozyme-PF00182','CHAP-PF05257','Lysozyme-PF04965','peptidase-PF05193','Lysozyme-PF00959','SH3_4-PF06347',
+    'Lysozyme-PF13702','Lysozyme-PF03245','Lysozyme-PF18013'
+
+
+
+
+
+
+
+
+
+
+
+
+PF18013      403
